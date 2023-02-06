@@ -205,6 +205,9 @@ class WordSearch:
 
         :return: WordSearch
         """
+        if height <= 0 or width <= 0 or num_of_words <= 0 or min_word_width <= 0 or extend_by <= 0:
+            raise ValueError("All parameters must be greater than 0")
+
         self = cls()
 
         # Creating the mapper
@@ -278,7 +281,7 @@ class WordSearch:
 
         return cls.generate(words, **kwargs)
 
-    def answer(self, x, y, s_x, s_y, word):
+    def answer(self, x, y, s_x, s_y):
         """
         Find a word on the grid
 
@@ -286,21 +289,13 @@ class WordSearch:
         :param y:       Starting y
         :param s_x:     Ending x
         :param s_y:     Ending y
-        :param word:    The word that is found
-        :return:        answered, found
-                        answered - bool, if the word was already found
-                        found    - bool, if the word is at the coordinates / user found it
+        :return:        found    - bool, if the word is at the coordinates / user found it
         """
-        if word not in self.words:
-            return False, False
-
-        start, end, answered = self.words[word]
-        if start == (x, y) and end == (s_x, s_y):
-            # User found the word, mark it as answered
-            self.words[word][2] = True
-            return answered, True
-        else:
-            return answered, False
+        for k, v in self.words.items():
+            if v[0] == (x, y) and v[1] == (s_x, s_y):
+                v[2] = True
+                return True
+        return False
 
     def to_string(self):
         # this is a bit confusing statement. Basically, its getting the width of the number and adding it by 2
@@ -329,21 +324,6 @@ class WordSearch:
             string += str(number).ljust(string_space)
             string += f"{' '.join(line)}\n"
 
-        string += f"\n{', '.join(self.words)} -- {self.words}"
+        string += f"\n{', '.join(self.words)}"
 
         return string
-
-# import time
-# count = time.time()
-# test = WordSearch.generate_json("words_dictionary.json", num_of_words=10, add_letters=True, extend_by=1,
-#                                 height=1, width=20)
-# done = time.time()
-# print(test.to_string())
-# print(f"\nFinished in {done - count} seconds!\n")
-# print(f"\n{test.width} - {test.height}")
-# # heh = input()
-# # heh = heh.split(', ')
-# # for k, v in enumerate(heh[0:4]):
-# #     heh[k] = int(v)
-# #
-# # print(test.answer(*heh))

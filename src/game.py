@@ -3,19 +3,26 @@ import datetime
 import blessed
 from word_search import WordSearch
 
+# TODO: Stop Game when all words are found
+# TODO: Add Loading screen
+# TODO: Maybe add in arrows for the grid. Or at least let the user know how big the grid is
+# TODO: Add in a save / load
+
 
 class Game:
-    def __init__(self, filename="words_dictionary.json"):
-        self.word_search = WordSearch.generate_json(filename, width=100, height=100)
+    def __init__(self, word_search: WordSearch):
+        self.word_search = word_search
         self.terminal = blessed.Terminal()
 
         self.keys = {
             # code - (method, args)
-            259: (self._move, 0, -1),   # Up
-            258: (self._move, 0, 1),    # Down
-            260: (self._move, -1, 0),   # Left
-            261: (self._move, 1, 0),    # Right
-            343: (self._select, )       # Enter
+            "w": (self._move, 0, -1),   # Up
+            "s": (self._move, 0, 1),    # Down
+            "a": (self._move, -1, 0),   # Left
+            "d": (self._move, 1, 0),    # Right
+            " ": (self._select, ),      # Enter
+            "r": (self._move_words, -1),
+            "f": (self._move_words, 1)
         }
 
         self.positions = {
@@ -36,9 +43,19 @@ class Game:
         self.select = []
         self.cursor = [0, 0]
         self.off_set = [0, 0]
-        # TODO: Might want it to start when the user starts playing
-        self.started = datetime.datetime.now()
+
+        # TODO: Remove selected_word and use self.info
+        self.selected_word = ""
+        self.selected_coords = []
+
+        self.word_rows = []
+        self.word_offset = 0
+
         self.info = ""
+        
+        self.started = datetime.datetime.now()
+
+        self.window_too_small = False
 
     def _draw_line(self, a_x, a_y, b_x, b_y):
         """
@@ -102,7 +119,31 @@ class Game:
                 else:
                     x = round((y - b) / m)
 
-                coords.append([x, y])
+                # Adding the coord to the coords list.
+                # Checking if the coord is already in the list. Then put it in order.
+                # This is mainly so we can easily grab the word that was selected.
+                cord = [x, y]
+                if cord not in coords:
+                    added = False
+                    for k, c in enumerate(coords):
+                        if c[0] >= cord[0]:
+                            # TODO: Clean this up. It's a bit messy
+                            if m is None or m > 0:
+                                if c[1] >= cord[1]:
+                                    coords = coords[:k] + [cord] + coords[k:]
+                                    added = True
+                                    break
+                            elif m < 0:
+                                if c[1] <= cord[1]:
+                                    coords = coords[:k] + [cord] + coords[k:]
+                                    added = True
+                                    break
+
+                    if added is False:
+                        coords.append(cord)
+
+        # self.info = str(m)
+
         return coords
 
     def _resize_mapper(self):
@@ -114,7 +155,7 @@ class Game:
         max_coord = [
             # dividing terminal.width by 2 since each letter is spaced out taking up 2 spaces.
             self.off_set[0] + (round(self.terminal.width / 2)) - side_spacing + 1,
-            self.off_set[1] + self.terminal.height - top_spacing - 6
+            self.off_set[1] + self.terminal.height - top_spacing - 7
         ]
 
         # Grabbing a copy of the mapper resized or basically cutting some letters out to fit on the screen
@@ -123,6 +164,13 @@ class Game:
         for row in self.word_search.mapper[self.off_set[1]:max_coord[1]]:
             row = row[self.off_set[0]:max_coord[0]]
             mapper.append(row)
+
+        if not mapper:
+            # Terminal is too small to fit the grid
+            self.window_too_small = True
+            return
+        else:
+            self.window_too_small = False
 
         # Creating the column numbers
         top = [[]]
@@ -183,10 +231,18 @@ class Game:
 
     def _grab_grid(self):
         string = self.current_mapper["top"]
+
         if self.select:
-            select_coords = self._draw_line(*self.cursor, *self.select)
+            self.selected_coords = self._draw_line(*self.cursor, *self.select)
+
+            # Grabbing the world that is selected
+            selected_word = ""
+            for coord in self.selected_coords:
+                selected_word += self.word_search.mapper[coord[1]][coord[0]]
+            self.selected_word = selected_word
         else:
-            select_coords = []
+            self.selected_coords = []
+            self.selected_word = ""
 
         for i, row in enumerate(self.current_mapper["mapper"]):
             y = i + self.off_set[1]
@@ -197,9 +253,12 @@ class Game:
                 if [x, y] == self.cursor:
                     # Highlighting the cursor
                     string += self.terminal.reverse(val)
-                elif [x, y] in self.found_coords or [x, y] in select_coords:
-                    # Its a word that was found or user is selecting between two coordinates
+                elif [x, y] in self.selected_coords:
+                    # user is selecting between two coordinates
                     string += self.terminal.white_on_green(val)
+                elif [x, y] in self.found_coords:
+                    # Highlighting the found words
+                    string += self.terminal.white_on_blue(val)
                 else:
                     string += val
                 string += " "
@@ -207,14 +266,77 @@ class Game:
 
         return self.terminal.move_xy(0, 0) + string
 
+    def _set_words(self):
+        self.word_rows = []
+        width = self.terminal.width - 2  # subtract 2 to give room to add the arrows
+
+        rows = [[]]
+        cur_width = 0
+
+        for word in self.word_search.words:
+            word_width = len(word) + 2
+
+            # Checking if the word is found
+            if self.word_search.words[word][2]:
+                word = self.terminal.white_on_blue(word)
+
+            # Adding the word by checking if it can fit in the current row
+            if width <= cur_width + word_width:
+                rows.append([word])
+                cur_width = word_width
+            else:
+                rows[-1].append(word)
+                cur_width += word_width
+
+        for r in rows:
+            self.word_rows.append(", ".join(r))
+
+        # Checking if the offset is outside. Just in case the screen was resized
+        if self.word_offset > len(self.word_rows) - 1:
+            self.word_offset = 0
+
     def _grab_words(self):
-        pass
+        coord = list(self.positions["timer"][0])
+        coord[1] += 2
+
+        max_rows = (self.terminal.height - coord[1]) - 1
+
+        if max_rows >= len(self.word_rows):
+            rows = self.word_rows
+        else:
+            rows = self.word_rows[self.word_offset:max_rows + self.word_offset]
+            # Adding the arrows
+            # Checking if there are any words hidden above
+            if self.word_offset > 0:
+                width = self.terminal.width - len(rows[0])
+                rows[0] += self.terminal.rjust("▲", width)
+
+            # Checking if there are anymore words hidden on the bottom
+            if len(self.word_rows) - self.word_offset > max_rows:
+                width = self.terminal.width - len(rows[-1])
+                rows[-1] += self.terminal.rjust("▼", width)
+
+        string = "\n".join(rows)
+
+        self.positions['words'] = [
+            (*coord,),
+            (coord[0], coord[1] + len(rows))
+        ]
+
+        return self.terminal.move_xy(*coord) + string
 
     def _grab_info(self):
-        coord = self._get_coord("timer", (0, 0))
+        # TODO: Make this return "" if the info is empty
+        coord = self._get_coord("timer", (1, 0))
         max_x = self.terminal.width - coord[0]
 
-        info = self.info.format(cursor=self.cursor, select=self.select)
+        if self.selected_word:
+            info = f"Selected Word: {self.selected_word} | {self.selected_word[::-1]}"
+        else:
+            info = " "
+
+        # info = self.info
+
         if len(info) >= max_x:
             info = info[0: max_x - 4]
             info += "..."
@@ -240,11 +362,27 @@ class Game:
         return self.terminal.move_xy(*coord) + str(time_since)
 
     def _print(self, grid=False):
+        """
+        Prints the game to the terminal
+        :param grid:   bool    - If true, it'll clear the terminal and update everything
+        :return:       None
+        """
+        if self.window_too_small:
+            print(self.terminal.move_xy(0, 0) + "Screen is too small.")
+            return
+        
         string = ""
+
         if grid:
             string += self.terminal.clear() + self._grab_grid()
+
+        # Don't like the two if statements. But it needs to be in order
         string += self._update_timer()
-        string += self._grab_info()
+
+        if grid:
+            string += self._grab_info()
+            string += self._grab_words()
+
         print(string)
 
     def _move(self, t_x, t_y):
@@ -276,9 +414,26 @@ class Game:
                 # Moving the cursor
                 self.cursor[k] += args[k]
 
+    def _move_words(self, offset):
+        self.word_offset += offset
+
+        if self.word_offset < 0:
+            self.word_offset = 0
+
+        elif self.word_offset >= len(self.word_rows):
+            self.word_offset = len(self.word_rows) - 1
+
     def _select(self):
         if self.select:
-            # TODO: Check if word exist
+            # TODO: if its already found, don't add coordinates
+            found = self.word_search.answer(*self.cursor, *self.select)
+            if not found:
+                found = self.word_search.answer(*self.select, *self.cursor)
+
+            if found:
+                self.found_coords += self.selected_coords
+                self._set_words()
+
             self.select = []
         else:
             self.select = list(self.cursor)
@@ -288,25 +443,24 @@ class Game:
             current_size = (self.terminal.width, self.terminal.height)
             with self.terminal.fullscreen(), self.terminal.cbreak(), self.terminal.hidden_cursor():
                 self._resize_mapper()
+                self._set_words()
                 self._print(grid=True)
                 val = ''
                 while val.lower() != 'q':
                     val = self.terminal.inkey(timeout=1)
 
-                    if val.code in self.keys:
-                        run, args = self.keys[val.code][0], self.keys[val.code][1:]
+                    if val in self.keys:
+                        run, args = self.keys[val][0], self.keys[val][1:]
                         run(*args)
                         # self.found_coords = self._draw_line(5, 5, *self.cursor)
                         self._print(grid=True)
-                    self._print(grid=False)
+                    else:
+                        self._print(grid=False)
                     if current_size != (self.terminal.width, self.terminal.height):
                         break
             if val == 'q':
                 break
             self.cursor = list(self.off_set)
 
-game = Game()
-game.start()
-# game._draw_line(10, 10, 50, 0)
-# print(f"{game.terminal.clear()}{game._grab_grid()}")
-# print(f"{game.positions} -- {game.terminal.width} / {game.terminal.height}")
+    def load_key_config(self):
+        pass

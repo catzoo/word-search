@@ -3,7 +3,7 @@
  You will be able to control a cursor in the grid, then select the word by pressing `ENTER` (as shown below).
 
 
-![Matrix gif](/search.gif)
+![Matrix gif](/img/search.gif)
 
 
 ## Requirements
